@@ -1159,7 +1159,8 @@ impl<T: Trait<I>, I: Instance> Currency<T::AccountId> for Module<T, I> where
 
 			// bail if we need to keep the account alive and this would kill it.
 			let ed = T::ExistentialDeposit::get();
-			let would_kill = new_free_account < ed && account.free >= ed;
+			let would_be_dead = new_free_account + account.reserved < ed;
+			let would_kill = would_be_dead && account.free + account.reserved >= ed;
 			ensure!(liveness == AllowDeath || !would_kill, Error::<T, I>::KeepAlive);
 
 			Self::ensure_can_withdraw(who, value, reasons, new_free_account)?;
@@ -1185,7 +1186,7 @@ impl<T: Trait<I>, I: Instance> Currency<T::AccountId> for Module<T, I> where
 			// equal and opposite cause (returned as an Imbalance), then in the
 			// instance that there's no other accounts on the system at all, we might
 			// underflow the issuance and our arithmetic will be off.
-			ensure!(value >= ed || !account.free.is_zero(), ());
+			ensure!(value + account.reserved >= ed || !account.total().is_zero(), ());
 
 			let imbalance = if account.free <= value {
 				SignedImbalance::Positive(PositiveImbalance::new(value - account.free))
@@ -1266,17 +1267,22 @@ impl<T: Trait<I>, I: Instance> ReservableCurrency<T::AccountId> for Module<T, I>
 
 	/// Move the reserved balance of one account into the balance of another, according to `status`.
 	///
-	/// Is a no-op if the value to be moved is zero.
+	/// Is a no-op if:
+	/// - the value to be moved is zero; or
+	/// - the `slashed` id equal to `beneficiary` and the `status` is `Reserved`.
 	fn repatriate_reserved(
 		slashed: &T::AccountId,
 		beneficiary: &T::AccountId,
 		value: Self::Balance,
 		status: Status,
 	) -> Result<Self::Balance, DispatchError> {
-		if value.is_zero() { return Ok (Zero::zero()) }
+		if value.is_zero() { return Ok(Zero::zero()) }
 
 		if slashed == beneficiary {
-			return Ok(Self::unreserve(slashed, value));
+			return match status {
+				Status::Free => Ok(Self::unreserve(slashed, value)),
+				Status::Reserved => Ok(Self::reserved_balance(slashed)),
+			};
 		}
 
 		Self::try_mutate_account(beneficiary, |to_account| -> Result<Self::Balance, DispatchError> {

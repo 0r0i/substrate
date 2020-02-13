@@ -63,11 +63,7 @@ impl<B: BlockT, Transaction: Send + 'static> BasicQueue<B, Transaction> {
 			finality_proof_import,
 		);
 
-		let mut pool = futures::executor::ThreadPool::builder()
-			.name_prefix("import-queue-worker-")
-			.pool_size(1)
-			.create()
-			.ok();
+		let mut pool: Option<futures::executor::ThreadPool> = None;
 
 		let manual_poll;
 		if let Some(pool) = &mut pool {
